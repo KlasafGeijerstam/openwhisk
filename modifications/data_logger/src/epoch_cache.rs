@@ -21,10 +21,10 @@ impl fmt::Display for EpochCache {
 impl std::fmt::Debug for EpochCache {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("EpochCache")
-         .field("epoch_length", &self.epoch_length)
-         .field("current", &self.current)
-         .field("working_len", &self.working.len())
-         .finish()
+            .field("epoch_length", &self.epoch_length)
+            .field("current", &self.current)
+            .field("working_len", &self.working.len())
+            .finish()
     }
 }
 
@@ -55,7 +55,7 @@ impl EpochCache {
 
     fn moving_average(&self) -> u64 {
         if self.working.is_empty() {
-            return 0
+            return 0;
         }
 
         let alpha = 0.5;

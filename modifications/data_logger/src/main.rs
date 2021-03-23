@@ -128,7 +128,10 @@ async fn get_graph(graph: CallGraph) -> impl Responder {
         &[Config::EdgeNoLabel, Config::NodeNoLabel],
         &|g, edge| {
             let parent_invoke = g[edge.source()].invoke_count as f64;
-            format!("label = \"{:.2}\"", edge.weight().call_count as f64 / parent_invoke)
+            format!(
+                "label = \"{:.2}\"",
+                edge.weight().call_count as f64 / parent_invoke
+            )
         },
         &|_g, (_, node)| {
             format!(
