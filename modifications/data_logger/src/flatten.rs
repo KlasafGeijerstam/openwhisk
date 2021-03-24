@@ -1,4 +1,4 @@
-use crate::{epoch_cache::EpochCache};
+use crate::epoch_cache::EpochCache;
 use std::fmt;
 
 use petgraph::algo::{all_simple_paths, astar, has_path_connecting};
@@ -38,6 +38,18 @@ pub enum Node {
     P(u64),
 }
 
+
+impl fmt::Display for Node {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&match self {
+            N(n) => format!("N({})", n),
+            B(_) => format!("B({})", self.delay()),
+            P(n) => format!("P({})", n),
+        }
+        ,f)
+    }
+}
+
 impl Node {
     fn delay(&self) -> u64 {
         match self {
@@ -45,7 +57,8 @@ impl Node {
                 .iter()
                 .map(|(n, p)| (n.delay() as f64 * p) as u64)
                 .sum(),
-            other => other.delay(),
+            N(a) => *a,
+            P(a) => *a,
         }
     }
 }
@@ -131,8 +144,8 @@ pub fn remove_branch(from_node: NodeIndex, to_node: NodeIndex, graph: &mut Graph
 }
 
 pub fn remove_self_loops(graph: &mut Graph) {
-    let tmp = graph.clone();
 
+    let tmp = graph.clone();
     // remove self-loops
     for node in tmp.node_indices() {
         // - find node with self-loop
@@ -142,6 +155,7 @@ pub fn remove_self_loops(graph: &mut Graph) {
             let e_weight = graph[e_index];
             graph.remove_edge(e_index);
 
+            let tmp = graph.clone();
             // Update other edges with new probability
             for edge in tmp.edges(node) {
                 graph.update_edge(
@@ -203,14 +217,16 @@ pub fn remove_parallel(from_node: NodeIndex, to_node: NodeIndex, graph: &mut Gra
                 path.iter()
                     .zip(path.iter().skip(1))
                     .fold(0.0, |acc, (&from, &to)| {
+                        let edge = graph.find_edge(from, to).unwrap();
+                        let edge_probability = graph[edge];
+                        
                         if acc != 0.0 {
                             // Remove intermideary nodes
                             graph.remove_node(from);
                         }
 
-                        let edge = graph.find_edge(from, to).unwrap();
-                        let edge_probability = graph[edge];
                         acc + (graph[to].delay() as f64 * edge_probability)
+
                     }) as u64,
             )
         })
@@ -226,19 +242,37 @@ pub fn remove_parallel(from_node: NodeIndex, to_node: NodeIndex, graph: &mut Gra
     graph.add_edge(new_node, to_node, 1.0);
 }
 
-pub fn remove_parallels(graph: &mut Graph) {
-    let tmp = graph.clone();
+
+pub fn find_cyclic_path(path: &mut Vec<NodeIndex>, graph: &Graph) -> bool {
+
+    for edge in graph.edges(*path.last().unwrap()) {
+        if edge.target() == path[0] {
+            return true;
+        }
+
+        if !path.contains(&edge.target()) {
+            path.push(edge.target());
+
+            if find_cyclic_path(path, graph) {
+                return true;
+            } else {
+                path.pop();
+            }
+        }
+    }
+    false
 }
 
-
-fn remove_cycle(node: NodeIndex, graph: &mut Graph) {
-    let g = graph.clone();
+fn remove_cycle(node: NodeIndex, graph: &mut Graph) -> bool {
+    /*
     let (_, mut path) = astar(&g, node, |n| n == node, |_| 0, |_| 0)
         .expect("Could not find a path (cycle) starting with given node");
+        */
+    let mut path = vec![node];
+    if !find_cyclic_path(&mut path, &graph) {
+        return false;
+    }
 
-    let &last_node = path.last().unwrap();
-
-    path.insert(0, node);
     path.push(node);
 
     let cycle_probability: f64 = path
@@ -252,30 +286,36 @@ fn remove_cycle(node: NodeIndex, graph: &mut Graph) {
 
     let cycle_cost: u64 = path.iter().map(|n| graph[*n].delay()).sum();
 
-    // - remove the edge that causes self-loop
-    let e_index = graph.find_edge(last_node, node).unwrap();
-    let e_weight = graph[e_index];
-    graph.remove_edge(e_index);
+    for (from, to) in path.iter().zip(path.iter().skip(1)).rev() {
+        let e_index = graph.find_edge(*from, *to).unwrap();
 
-    // Update other edges with new probability
-    for edge in g.edges(last_node) {
-        graph.update_edge(
-            edge.source(),
-            edge.target(),
-            edge.weight() / (1.0 - e_weight),
-        );
-        
+        if graph[e_index] < 1.0 {
+            let e_weight = graph[e_index];
+            graph.remove_edge(e_index);
+
+            // Update other edges with new probability
+            let g = graph.clone();
+            for edge in g.edges(*from) {
+                graph.update_edge(
+                    edge.source(),
+                    edge.target(),
+                    edge.weight() / (1.0 - e_weight),
+                );
+            }
+            graph[*from] = P(graph[*from].delay()
+                + ((cycle_probability / (1.0 - cycle_probability)) * (cycle_cost as f64)) as u64);
+
+            return true;
+        }
     }
 
-    // TODO: Backtrack and remove first non-1.0 edge (and subsequent nodes)
-
-    // - add the additional execution time to the node according to paper
-    graph[last_node] = P(graph[last_node].delay()
-        + ((cycle_probability / (1.0 - cycle_probability)) * (cycle_cost as f64)) as u64);
+    panic!("remove_cycle");
 }
 
 pub fn flatten(graph: &mut Graph) {
     remove_self_loops(graph);
+    println!("remove_self_loops");
+    println!("{}", get_graph(&graph));
 
     let mut processed = true;
 
@@ -289,12 +329,16 @@ pub fn flatten(graph: &mut Graph) {
                     if has_n_parallel_paths(from_node, to_node, graph, path_count) {
                         remove_parallel(from_node, to_node, graph);
                         processed = true;
+                        println!("remove_parallel");
+                        println!("{}", get_graph(&graph));
                         continue 'outer;
                     }
 
                     if has_n_branch_paths(from_node, to_node, graph, path_count) {
                         remove_branch(from_node, to_node, graph);
                         processed = true;
+                        println!("remove_branch");
+                        println!("{}", get_graph(&graph));
                         continue 'outer;
                     }
                 }
@@ -302,8 +346,9 @@ pub fn flatten(graph: &mut Graph) {
         }
 
         for node in tmp.node_indices() {
-            if has_path_connecting(&tmp, node, node, None) {
-                remove_cycle(node, graph);
+            if remove_cycle(node, graph) {
+                println!("remove_cycle");
+                println!("{}", get_graph(&graph));
 
                 processed = true;
                 continue 'outer;
@@ -312,6 +357,55 @@ pub fn flatten(graph: &mut Graph) {
     }
 }
 
+pub fn get_graph(graph: &Graph) -> String {
+    use petgraph::dot::*;
+
+    let gv = Dot::with_attr_getters(
+        graph,
+        &[Config::EdgeNoLabel, Config::NodeNoLabel],
+        &|g, edge| {
+            format!(
+                "label = \"{:.2}\"", edge.weight()
+            )
+        },
+        &|_g, (_, node)| {
+            format!(
+                "label = {}", node.to_string()
+            )
+        },
+    );
+
+    format!("{}", gv)
+}
+#[test]
+fn test_graph() {
+    let mut graph = StableGraph::new();
+
+    let f1 = graph.add_node(N(1));
+    let f2 = graph.add_node(N(2));
+    let f3 = graph.add_node(N(3));
+    let f4 = graph.add_node(N(4));
+    let f5 = graph.add_node(N(5));
+    let f6 = graph.add_node(N(6));
+
+    graph.add_edge(f1, f3, 0.8);
+    graph.add_edge(f1, f5, 0.2);
+    graph.add_edge(f1, f2, 1.0);
+
+    graph.add_edge(f3, f4, 1.0);
+    graph.add_edge(f5, f4, 1.0);
+    graph.add_edge(f2, f4, 1.0);
+
+    graph.add_edge(f4, f1, 0.1);
+    graph.add_edge(f4, f4, 0.2);
+    graph.add_edge(f4, f6, 0.7);
+
+    println!("{}", get_graph(&graph));
+    flatten(&mut graph);
+    //println!("{}", get_graph(&graph));
+}
+
+/*
 #[test]
 fn test_removing_cycles() {
     let mut graph = StableGraph::new();
@@ -323,11 +417,21 @@ fn test_removing_cycles() {
     graph.add_edge(f1, f2, 1.0);
     graph.add_edge(f2, f3, 0.2);
     graph.add_edge(f2, f1, 0.8);
-    
+
+
     for i in 0..10 {
         assert_eq!(has_n_branch_paths(f1, f2, &graph, i), false);
         assert_eq!(has_n_parallel_paths(f1, f2, &graph, i), false);
     }
+
+    assert_eq!(graph.edge_count(), 3);
+    remove_cycle(f1, &mut graph);
+
+    assert_eq!(graph.node_count(), 3);
+    assert_eq!(graph.edge_count(), 2);
+    let edge_index = graph.find_edge(f2, f3).unwrap();
+    assert_eq!((graph[edge_index] - 1.0).abs() <= f64::EPSILON, true);
+    assert_eq!(graph.edges(f2).count(), 1);
 }
 
 #[test]
@@ -373,3 +477,4 @@ fn test_removing_self_loops() {
 
     assert_eq!(graph[a], N(650));
 }
+*/
