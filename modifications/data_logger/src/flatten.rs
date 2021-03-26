@@ -125,6 +125,7 @@ pub fn remove_branch(from_node: NodeIndex, to_node: NodeIndex, graph: &mut Graph
     // remove edges leading to nodes that will be merged
     for p in &paths {
         for (&from, &to) in p.iter().zip(p.iter().skip(1)) {
+            println!("from: {:?},  to: {:?}", from, to);
             let edge_index = graph.find_edge(from, to).unwrap();
             graph.remove_edge(edge_index);
         }
@@ -377,6 +378,102 @@ pub fn get_graph(graph: &Graph) -> String {
 
     format!("{}", gv)
 }
+/*
+#[test]
+fn test_slapp_example() {
+    let mut graph = StableGraph::new();
+
+    let f1 = graph.add_node(N(560));
+    let f2 = graph.add_node(N(320));
+    let f3 = graph.add_node(N(260));
+    let f4 = graph.add_node(N(840));
+    let f5 = graph.add_node(N(520));
+    let f6 = graph.add_node(N(150));
+    let f7 = graph.add_node(N(430));
+
+    graph.add_edge(f1, f2, 1.0);
+    graph.add_edge(f1, f5, 1.0);
+
+    graph.add_edge(f2, f3, 0.7);
+    graph.add_edge(f2, f4, 0.3);
+
+    graph.add_edge(f3, f6, 1.0);
+    graph.add_edge(f4, f6, 1.0);
+
+    graph.add_edge(f5, f5, 0.2);
+    graph.add_edge(f5, f6, 0.8);
+
+    graph.add_edge(f6, f1, 0.1);
+    graph.add_edge(f6, f7, 0.9);
+
+    println!("{}", get_graph(&graph));
+    flatten(&mut graph);
+    //println!("{}", get_graph(&graph));
+}
+*/
+
+#[test]
+fn test_graph_app16() {
+    let mut graph = StableGraph::new();
+
+    let f1 = graph.add_node(N(1));
+    let f2 = graph.add_node(N(2));
+    let f3 = graph.add_node(N(3));
+    let f4 = graph.add_node(N(4));
+    let f5 = graph.add_node(N(5));
+    let f6 = graph.add_node(N(6));
+    let f7 = graph.add_node(N(7));
+    let f8 = graph.add_node(N(8));
+    let f9 = graph.add_node(N(9));
+    let f10 = graph.add_node(N(10));
+    let f11 = graph.add_node(N(11));
+    let f12 = graph.add_node(N(12));
+    let f13 = graph.add_node(N(13));
+    let f14 = graph.add_node(N(14));
+    let f15 = graph.add_node(N(15));
+    let f16 = graph.add_node(N(16));
+
+    graph.add_edge(f1, f2, 1.0);
+    graph.add_edge(f1, f3, 1.0);
+
+    graph.add_edge(f2, f4, 0.6);
+    graph.add_edge(f2, f5, 0.4);
+
+    graph.add_edge(f5, f11, 1.0);
+    graph.add_edge(f5, f12, 1.0);
+
+    graph.add_edge(f11, f7, 1.0);
+    graph.add_edge(f12, f13, 1.0);
+
+    graph.add_edge(f12, f13, 1.0);
+
+    graph.add_edge(f13, f14, 1.0);
+
+    graph.add_edge(f14, f13, 0.3);
+    graph.add_edge(f14, f7, 0.7);
+
+    graph.add_edge(f3, f10, 0.2);
+    graph.add_edge(f3, f9, 0.8);
+
+    graph.add_edge(f10, f6, 1.0);
+
+    graph.add_edge(f9, f15, 1.0);
+
+    graph.add_edge(f15, f15, 0.05);
+    graph.add_edge(f15, f16, 0.95);
+
+    graph.add_edge(f16, f6, 1.0);
+
+    graph.add_edge(f6, f7, 0.9);
+
+    graph.add_edge(f7, f7, 0.2);
+    graph.add_edge(f7, f8, 0.8);
+
+    println!("{}", get_graph(&graph));
+    flatten(&mut graph);
+    //println!("{}", get_graph(&graph));
+}
+/*
 #[test]
 fn test_graph() {
     let mut graph = StableGraph::new();
@@ -404,6 +501,7 @@ fn test_graph() {
     flatten(&mut graph);
     //println!("{}", get_graph(&graph));
 }
+*/
 
 /*
 #[test]
@@ -462,6 +560,7 @@ fn test_removing_branches() {
         }
     }
 }
+
 
 #[test]
 fn test_removing_self_loops() {
