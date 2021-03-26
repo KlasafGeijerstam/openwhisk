@@ -38,15 +38,16 @@ pub enum Node {
     P(u64),
 }
 
-
 impl fmt::Display for Node {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        fmt::Debug::fmt(&match self {
-            N(n) => format!("N({})", n),
-            B(_) => format!("B({})", self.delay()),
-            P(n) => format!("P({})", n),
-        }
-        ,f)
+        fmt::Display::fmt(
+            &match self {
+                N(n) => format!("N({})", n),
+                B(_) => format!("B({})", self.delay()),
+                P(n) => format!("P({})", n),
+            },
+            f,
+        )
     }
 }
 
@@ -74,7 +75,8 @@ pub fn has_n_branch_paths(
     let paths: Vec<_> =
         all_simple_paths::<Vec<_>, _>(&graph, from_node, to_node, 1, None).collect();
 
-    if paths.len() != path_count {
+    if paths.len() != path_count || graph.edges(from_node).count() < 2 || !graph.edges(from_node).any(
+        |e| *e.weight() < 1.0) {
         return false;
     }
 
@@ -88,7 +90,7 @@ pub fn has_n_branch_paths(
 
         sum += tmp_sum;
     }
-    sum == 1.0
+    (sum - 1.0).abs() <= f64::EPSILON
 }
 
 pub fn remove_branch(from_node: NodeIndex, to_node: NodeIndex, graph: &mut Graph) {
@@ -125,9 +127,9 @@ pub fn remove_branch(from_node: NodeIndex, to_node: NodeIndex, graph: &mut Graph
     // remove edges leading to nodes that will be merged
     for p in &paths {
         for (&from, &to) in p.iter().zip(p.iter().skip(1)) {
-            println!("from: {:?},  to: {:?}", from, to);
-            let edge_index = graph.find_edge(from, to).unwrap();
-            graph.remove_edge(edge_index);
+            if let Some(edge_index) = graph.find_edge(from, to) {
+                graph.remove_edge(edge_index);
+            }
         }
     }
 
@@ -145,7 +147,6 @@ pub fn remove_branch(from_node: NodeIndex, to_node: NodeIndex, graph: &mut Graph
 }
 
 pub fn remove_self_loops(graph: &mut Graph) {
-
     let tmp = graph.clone();
     // remove self-loops
     for node in tmp.node_indices() {
@@ -218,34 +219,34 @@ pub fn remove_parallel(from_node: NodeIndex, to_node: NodeIndex, graph: &mut Gra
                 path.iter()
                     .zip(path.iter().skip(1))
                     .fold(0.0, |acc, (&from, &to)| {
-                        let edge = graph.find_edge(from, to).unwrap();
-                        let edge_probability = graph[edge];
-                        
-                        if acc != 0.0 {
-                            // Remove intermideary nodes
-                            graph.remove_node(from);
-                        }
+                        println!("from: {:?},  to: {:?}", from, to);
+                        let edge_probability = if let Some(edge) = graph.find_edge(from, to) {
+                            graph[edge]
+                        } else {
+                            panic!("aaah")
+                        };
 
                         acc + (graph[to].delay() as f64 * edge_probability)
-
                     }) as u64,
             )
         })
         .max_by_key(|(_, length)| *length)
         .unwrap();
-
+    
+    
     for edge in tmp.edges(from_node) {
         graph.remove_edge(edge.id());
     }
+
+    let len = len - graph[to_node].delay();
+
 
     let new_node = graph.add_node(P(len));
     graph.add_edge(from_node, new_node, 1.0);
     graph.add_edge(new_node, to_node, 1.0);
 }
 
-
 pub fn find_cyclic_path(path: &mut Vec<NodeIndex>, graph: &Graph) -> bool {
-
     for edge in graph.edges(*path.last().unwrap()) {
         if edge.target() == path[0] {
             return true;
@@ -265,10 +266,6 @@ pub fn find_cyclic_path(path: &mut Vec<NodeIndex>, graph: &Graph) -> bool {
 }
 
 fn remove_cycle(node: NodeIndex, graph: &mut Graph) -> bool {
-    /*
-    let (_, mut path) = astar(&g, node, |n| n == node, |_| 0, |_| 0)
-        .expect("Could not find a path (cycle) starting with given node");
-        */
     let mut path = vec![node];
     if !find_cyclic_path(&mut path, &graph) {
         return false;
@@ -313,7 +310,7 @@ fn remove_cycle(node: NodeIndex, graph: &mut Graph) -> bool {
     panic!("remove_cycle");
 }
 
-pub fn flatten(graph: &mut Graph) {
+pub fn flatten(graph: &mut Graph, start: NodeIndex, end: NodeIndex) {
     remove_self_loops(graph);
     println!("remove_self_loops");
     println!("{}", get_graph(&graph));
@@ -324,28 +321,6 @@ pub fn flatten(graph: &mut Graph) {
         processed = false;
 
         let tmp = graph.clone();
-        for path_count in 2..tmp.node_count() {
-            for from_node in tmp.node_indices() {
-                for to_node in tmp.node_indices() {
-                    if has_n_parallel_paths(from_node, to_node, graph, path_count) {
-                        remove_parallel(from_node, to_node, graph);
-                        processed = true;
-                        println!("remove_parallel");
-                        println!("{}", get_graph(&graph));
-                        continue 'outer;
-                    }
-
-                    if has_n_branch_paths(from_node, to_node, graph, path_count) {
-                        remove_branch(from_node, to_node, graph);
-                        processed = true;
-                        println!("remove_branch");
-                        println!("{}", get_graph(&graph));
-                        continue 'outer;
-                    }
-                }
-            }
-        }
-
         for node in tmp.node_indices() {
             if remove_cycle(node, graph) {
                 println!("remove_cycle");
@@ -355,7 +330,37 @@ pub fn flatten(graph: &mut Graph) {
                 continue 'outer;
             }
         }
+        for path_count in 2..tmp.node_count() {
+            for from_node in tmp.node_indices() {
+                for to_node in tmp.node_indices() {
+                    if has_n_parallel_paths(from_node, to_node, graph, path_count) {
+                        remove_parallel(from_node, to_node, graph);
+                        processed = true;
+                        println!("remove_parallel {} {} {}", from_node.index(), to_node.index(), path_count);
+                        println!("{}", get_graph(&graph));
+                        continue 'outer;
+                    }
+
+                    if has_n_branch_paths(from_node, to_node, graph, path_count) {
+                        remove_branch(from_node, to_node, graph);
+                        processed = true;
+                        println!("remove_branch {} {} {}", from_node.index(), to_node.index(), path_count);
+                        println!("{}", get_graph(&graph));
+                        continue 'outer;
+                    }
+                }
+            }
+        }
+
     }
+
+    prune_graph(graph, start, end);
+    println!("{}", get_graph(&graph));
+}
+
+pub fn prune_graph(graph: &mut Graph, start: NodeIndex, end: NodeIndex) {
+    let paths: Vec<_> = all_simple_paths::<Vec<_>, _>(&graph.clone(), start, end, 1, None).collect();
+    graph.retain_nodes(|_, node| paths[0].contains(&node));
 }
 
 pub fn get_graph(graph: &Graph) -> String {
@@ -364,16 +369,8 @@ pub fn get_graph(graph: &Graph) -> String {
     let gv = Dot::with_attr_getters(
         graph,
         &[Config::EdgeNoLabel, Config::NodeNoLabel],
-        &|g, edge| {
-            format!(
-                "label = \"{:.2}\"", edge.weight()
-            )
-        },
-        &|_g, (_, node)| {
-            format!(
-                "label = {}", node.to_string()
-            )
-        },
+        &|g, edge| format!("label = \"{:.2}\"", edge.weight()),
+        &|_g, (i, node)| format!("label = \"{} {}\"", node, i.index()),
     );
 
     format!("{}", gv)
@@ -416,6 +413,7 @@ fn test_slapp_example() {
 fn test_graph_app16() {
     let mut graph = StableGraph::new();
 
+    let start = graph.add_node(N(0));
     let f1 = graph.add_node(N(1));
     let f2 = graph.add_node(N(2));
     let f3 = graph.add_node(N(3));
@@ -433,11 +431,20 @@ fn test_graph_app16() {
     let f15 = graph.add_node(N(15));
     let f16 = graph.add_node(N(16));
 
+    let end = graph.add_node(N(17));
+
+    graph.add_edge(start, f1, 1.0);
+    graph.add_edge(f8, end, 1.0);
+
+
     graph.add_edge(f1, f2, 1.0);
     graph.add_edge(f1, f3, 1.0);
 
     graph.add_edge(f2, f4, 0.6);
     graph.add_edge(f2, f5, 0.4);
+
+
+    graph.add_edge(f4, f7, 1.0);
 
     graph.add_edge(f5, f11, 1.0);
     graph.add_edge(f5, f12, 1.0);
@@ -445,7 +452,6 @@ fn test_graph_app16() {
     graph.add_edge(f11, f7, 1.0);
     graph.add_edge(f12, f13, 1.0);
 
-    graph.add_edge(f12, f13, 1.0);
 
     graph.add_edge(f13, f14, 1.0);
 
@@ -464,13 +470,14 @@ fn test_graph_app16() {
 
     graph.add_edge(f16, f6, 1.0);
 
+    graph.add_edge(f6, f3, 0.1);
     graph.add_edge(f6, f7, 0.9);
 
     graph.add_edge(f7, f7, 0.2);
     graph.add_edge(f7, f8, 0.8);
 
     println!("{}", get_graph(&graph));
-    flatten(&mut graph);
+    flatten(&mut graph, start, end);
     //println!("{}", get_graph(&graph));
 }
 /*
