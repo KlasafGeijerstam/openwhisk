@@ -1,0 +1,12 @@
+digraph {
+    0 [ label = "f4"]
+    1 [ label = "f2"]
+    2 [ label = "end_point"]
+    3 [ label = "entry_point"]
+    4 [ label = "f1"]
+    0 -> 4 [ label = "0.10"]
+    0 -> 2 [ label = "0.90"]
+    1 -> 0 [ label = "1.00"]
+    3 -> 4 [ label = "1.00"]
+    4 -> 1 [ label = "1.00"]
+}

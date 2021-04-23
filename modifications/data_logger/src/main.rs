@@ -16,8 +16,6 @@ use flatten::*;
 
 #[derive(StructOpt, Clone)]
 struct Arguments {
-    /// The port to listen on
-    port: u16,
     /// Application config file (JSON)
     appplication_config: String,
 }
@@ -183,43 +181,59 @@ async fn post_log(
 type NodeIndicies = HashMap<String, petgraph::prelude::NodeIndex>;
 type CallGraph = web::Data<Mutex<(DiGraph<ActionInfo, EdgeInfo>, NodeIndicies)>>;
 
-#[allow(unused)]
-fn app_to_call_graph(app: &Application) -> CallGraph {
+fn app_to_call_graph(app: &Application, file_name: &str) {
     let mut graph = DiGraph::new();
     let mut index_map = HashMap::new();
 
-    for (name, action) in &app.actions {
-        let action = ActionInfo {
-            action_name: name.into(),
-            invoke_count: 0,
-            buffer: EpochCache::new(),
-        };
-        let index = graph.add_node(action);
-        index_map.insert(name.to_owned(), index);
+    for (name, _) in &app.actions {
+        let index = graph.add_node(name);
+        index_map.insert(name, index);
     }
 
     for (name, action) in &app.actions {
         let from_index = index_map[name];
         for edge in &action.actions {
             let to_index = index_map[&edge.action_name];
-            let w = EdgeInfo { call_count: 0 };
+            let w = edge.probability;
 
             graph.add_edge(from_index, to_index, w);
         }
     }
 
-    web::Data::new(Mutex::new((graph, index_map)))
+    use petgraph::dot::*;
+
+    let gv = Dot::with_attr_getters(
+        &graph,
+        &[Config::EdgeNoLabel, Config::NodeNoLabel],
+        &|_, edge| {
+            format!(
+                "label = \"{:.2}\"",
+                edge.weight()
+            )
+        },
+        &|_g, (_, node)| {
+            format!(
+                "label = \"{}\"",
+                node
+            )
+        },
+    );
+
+    std::fs::write(file_name, gv.to_string()).unwrap();
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let args = Arguments::from_args();
-    let port = args.port;
+    let port = 8000;
 
     let app: Application =
         serde_json::from_str(&std::fs::read_to_string(args.appplication_config)?).unwrap();
 
+    app_to_call_graph(&app, "original.dot");
+
     let app = web::Data::new(app);
+    
 
     let call_graph: CallGraph = web::Data::new(Mutex::new((DiGraph::new(), HashMap::new())));
 
