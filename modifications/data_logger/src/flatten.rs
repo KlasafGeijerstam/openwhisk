@@ -213,7 +213,6 @@ pub fn remove_parallel(from_node: NodeIndex, to_node: NodeIndex, graph: &mut Gra
                 path.iter()
                     .zip(path.iter().skip(1))
                     .fold(0.0, |acc, (&from, &to)| {
-                        println!("from: {:?},  to: {:?}", from, to);
                         let edge_probability = if let Some(edge) = graph.find_edge(from, to) {
                             graph[edge]
                         } else {

@@ -1,7 +1,7 @@
 use actix_web::{get, post, web, App, HttpServer, Responder};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::{collections::HashMap, time::Duration};
 use std::sync::Mutex;
 use std::time::Instant;
 use structopt::StructOpt;
@@ -119,6 +119,34 @@ async fn calls(
     "Ok"
 }
 
+#[get("/experiment_1")]
+async fn experiment_1(graph: CallGraph, times: AppTimes, exp_1: Experiment1) -> impl Responder {
+    use flatten::{Node, flatten};
+    use petgraph::visit::{IntoNodeIdentifiers};
+
+    let call_graph = graph.lock().unwrap();
+    let (graph, _) = &*call_graph;
+    
+    let mut ng = graph.map(|_, nw| {
+        Node::N(nw.buffer.current())
+    }, |edge_index, ew| {
+        let (source, _) = graph.edge_endpoints(edge_index).unwrap();
+        ew.call_count as f64 / graph[source].invoke_count as f64
+    });
+
+    let start = graph.node_identifiers().find(|&x| graph[x].action_name == "entry_point")
+        .expect("Failed to find entry_point");
+    let end = graph.node_identifiers().find(|&x| graph[x].action_name == "end_point")
+        .expect("Failed to find end_point");
+
+    let flatten_time = flatten(&mut ng, start, end);
+
+    //println!("Graph time estimation: {}", flatten_time);
+    //println!("EMA estimation: {}", times.lock().unwrap().durations.current());
+
+    format!("estimation: {}, actual, {}", flatten_time , exp_1.lock().unwrap().0)
+}
+
 #[get("/graph")]
 async fn get_graph(graph: CallGraph, times: AppTimes) -> impl Responder {
     use petgraph::dot::*;
@@ -174,6 +202,7 @@ async fn post_log(
     graph: CallGraph,
     application: web::Data<Application>,
     times: AppTimes,
+    exp_1: Experiment1
 ) -> impl Responder {
 
     if entry.action == "run_application" {
@@ -197,6 +226,7 @@ async fn post_log(
             times.durations.add(duration);
             println!("Logging application latency of: {}", duration);
             times.current_sum = 0;
+            exp_1.lock().unwrap().0 = duration;
         }
     } else {
         if times.lock().unwrap().current_sum > 0 {
@@ -233,6 +263,7 @@ async fn post_log(
 type NodeIndicies = HashMap<String, petgraph::prelude::NodeIndex>;
 type CallGraph = web::Data<Mutex<(StableGraph<ActionInfo, EdgeInfo>, NodeIndicies)>>;
 type AppTimes = web::Data<Mutex<Times>>;
+type Experiment1 = web::Data<Mutex<Experiment1Container>>;
 
 struct Times {
     current_sum: u64,
@@ -280,6 +311,9 @@ fn app_to_call_graph(app: &Application, file_name: &str) {
     std::fs::write(file_name, gv.to_string()).unwrap();
 }
 
+struct Experiment1Container(u64);
+
+
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let args = Arguments::from_args();
@@ -299,6 +333,9 @@ async fn main() -> std::io::Result<()> {
 
     let call_graph: CallGraph = web::Data::new(Mutex::new((StableGraph::new(), HashMap::new())));
 
+
+    let experiment_1_data = web::Data::new(Mutex::new(Experiment1Container(0)));
+
     env_logger::Builder::from_default_env().init();
     println!("Listening on http://0.0.0.0:{}/logs", port);
 
@@ -308,9 +345,11 @@ async fn main() -> std::io::Result<()> {
             .service(calls)
             .service(get_memory)
             .service(get_graph)
+            .service(experiment_1)
             .app_data(app.clone())
             .app_data(call_graph.clone())
             .app_data(times.clone())
+            .app_data(experiment_1_data.clone())
     })
     .bind(("0.0.0.0", port))?
     .run()
