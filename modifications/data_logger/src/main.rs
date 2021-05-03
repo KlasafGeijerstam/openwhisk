@@ -3,10 +3,11 @@ use log::{error, info};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
+use std::time::Instant;
 use structopt::StructOpt;
 use web::Path;
 
-use petgraph::graph::DiGraph;
+use petgraph::stable_graph::StableGraph;
 
 mod epoch_cache;
 use epoch_cache::EpochCache;
@@ -103,6 +104,10 @@ async fn calls(
         graph.add_node(action)
     });
 
+    if graph[from].action_name == "entry_point" {
+        graph[from].invoke_count += 1;
+    }
+
     let edge = match graph.find_edge(from, to) {
         Some(index) => index,
         _ => graph.add_edge(from, to, EdgeInfo::default()),
@@ -110,16 +115,36 @@ async fn calls(
 
     graph[edge].call_count += 1;
 
+
     "Ok"
 }
 
 #[get("/graph")]
-async fn get_graph(graph: CallGraph) -> impl Responder {
+async fn get_graph(graph: CallGraph, times: AppTimes) -> impl Responder {
     use petgraph::dot::*;
-    use petgraph::visit::EdgeRef;
+    use flatten::{Node, flatten};
+    use petgraph::visit::{EdgeRef, IntoNodeIdentifiers};
 
     let call_graph = graph.lock().unwrap();
     let (graph, _) = &*call_graph;
+    
+    let mut ng = graph.map(|_, nw| {
+        Node::N(nw.buffer.current())
+    }, |edge_index, ew| {
+        let (source, _) = graph.edge_endpoints(edge_index).unwrap();
+        ew.call_count as f64 / graph[source].invoke_count as f64
+    });
+
+    let start = graph.node_identifiers().find(|&x| graph[x].action_name == "entry_point")
+        .expect("Failed to find entry_point");
+    let end = graph.node_identifiers().find(|&x| graph[x].action_name == "end_point")
+        .expect("Failed to find end_point");
+
+    let flatten_time = flatten(&mut ng, start, end);
+
+    println!("Graph time estimation: {}", flatten_time);
+    println!("EMA estimation: {}", times.lock().unwrap().durations.current());
+    
 
     let gv = Dot::with_attr_getters(
         graph,
@@ -145,13 +170,40 @@ async fn get_graph(graph: CallGraph) -> impl Responder {
 
 #[post("/logs")]
 async fn post_log(
-    entry: web::Json<LogEntry>,
+    mut entry: web::Json<LogEntry>,
     graph: CallGraph,
     application: web::Data<Application>,
+    times: AppTimes,
 ) -> impl Responder {
+
+    if entry.action == "run_application" {
+        entry.action = "entry_point".into();
+    }
+
     if !application.actions.contains_key(&entry.action) {
         info!("Ignoring action: {}", entry.action);
         return "Ok";
+    }
+    
+    if entry.action == "entry_point" {
+        info!("Logging start of application");
+        times.lock().unwrap().current_sum = 1;
+    } else if entry.action == "end_point" {
+        let mut times = times.lock().unwrap();
+        let duration = times.current_sum;
+        if duration == 0 {
+            info!("Ignoring duplicate invocation");
+        } else {
+            times.durations.add(duration);
+            println!("Logging application latency of: {}", duration);
+            times.current_sum = 0;
+        }
+    } else {
+        if times.lock().unwrap().current_sum > 0 {
+            times.lock().unwrap().current_sum += entry.actual;
+        } else {
+            info!("Ignoring invocation before start");
+        }
     }
 
     info!("Received: {:?}", *entry);
@@ -179,10 +231,16 @@ async fn post_log(
 }
 
 type NodeIndicies = HashMap<String, petgraph::prelude::NodeIndex>;
-type CallGraph = web::Data<Mutex<(DiGraph<ActionInfo, EdgeInfo>, NodeIndicies)>>;
+type CallGraph = web::Data<Mutex<(StableGraph<ActionInfo, EdgeInfo>, NodeIndicies)>>;
+type AppTimes = web::Data<Mutex<Times>>;
+
+struct Times {
+    current_sum: u64,
+    durations: EpochCache
+}
 
 fn app_to_call_graph(app: &Application, file_name: &str) {
-    let mut graph = DiGraph::new();
+    let mut graph = StableGraph::new();
     let mut index_map = HashMap::new();
 
     for (name, _) in &app.actions {
@@ -233,9 +291,13 @@ async fn main() -> std::io::Result<()> {
     app_to_call_graph(&app, "original.dot");
 
     let app = web::Data::new(app);
+    let times = web::Data::new(Mutex::new(Times { 
+        current_sum: 0,
+        durations: EpochCache::new()
+    } ));
     
 
-    let call_graph: CallGraph = web::Data::new(Mutex::new((DiGraph::new(), HashMap::new())));
+    let call_graph: CallGraph = web::Data::new(Mutex::new((StableGraph::new(), HashMap::new())));
 
     env_logger::Builder::from_default_env().init();
     println!("Listening on http://0.0.0.0:{}/logs", port);
@@ -248,6 +310,7 @@ async fn main() -> std::io::Result<()> {
             .service(get_graph)
             .app_data(app.clone())
             .app_data(call_graph.clone())
+            .app_data(times.clone())
     })
     .bind(("0.0.0.0", port))?
     .run()

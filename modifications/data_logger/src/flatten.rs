@@ -1,7 +1,7 @@
 use crate::epoch_cache::EpochCache;
 use std::fmt;
 
-use petgraph::algo::{all_simple_paths, astar, has_path_connecting};
+use petgraph::algo::all_simple_paths;
 use petgraph::prelude::NodeIndex;
 use petgraph::{stable_graph::StableGraph, visit::EdgeRef};
 
@@ -201,12 +201,6 @@ pub fn has_n_parallel_paths(
     sum > 1.0
 }
 
-pub fn simple_path_count(graph: &Graph, from: NodeIndex, to: NodeIndex) -> usize {
-    all_simple_paths::<Vec<_>, _>(graph, from, to, 1, None)
-        .collect::<Vec<_>>()
-        .len()
-}
-
 pub fn remove_parallel(from_node: NodeIndex, to_node: NodeIndex, graph: &mut Graph) {
     let tmp = graph.clone();
     let paths: Vec<_> = all_simple_paths::<Vec<_>, _>(&tmp, from_node, to_node, 1, None).collect();
@@ -232,8 +226,8 @@ pub fn remove_parallel(from_node: NodeIndex, to_node: NodeIndex, graph: &mut Gra
         })
         .max_by_key(|(_, length)| *length)
         .unwrap();
-    
-    
+
+
     for edge in tmp.edges(from_node) {
         graph.remove_edge(edge.id());
     }
@@ -310,10 +304,10 @@ fn remove_cycle(node: NodeIndex, graph: &mut Graph) -> bool {
     panic!("remove_cycle");
 }
 
-pub fn flatten(graph: &mut Graph, start: NodeIndex, end: NodeIndex) {
+pub fn flatten(graph: &mut Graph, start: NodeIndex, end: NodeIndex) -> u64 {
     remove_self_loops(graph);
-    println!("remove_self_loops");
-    println!("{}", get_graph(&graph));
+    //println!("remove_self_loops");
+    //println!("{}", get_graph(&graph));
 
     let mut processed = true;
 
@@ -323,8 +317,8 @@ pub fn flatten(graph: &mut Graph, start: NodeIndex, end: NodeIndex) {
         let tmp = graph.clone();
         for node in tmp.node_indices() {
             if remove_cycle(node, graph) {
-                println!("remove_cycle");
-                println!("{}", get_graph(&graph));
+                //println!("remove_cycle");
+                //println!("{}", get_graph(&graph));
 
                 processed = true;
                 continue 'outer;
@@ -336,16 +330,16 @@ pub fn flatten(graph: &mut Graph, start: NodeIndex, end: NodeIndex) {
                     if has_n_parallel_paths(from_node, to_node, graph, path_count) {
                         remove_parallel(from_node, to_node, graph);
                         processed = true;
-                        println!("remove_parallel {} {} {}", from_node.index(), to_node.index(), path_count);
-                        println!("{}", get_graph(&graph));
+                        //println!("remove_parallel {} {} {}", from_node.index(), to_node.index(), path_count);
+                        //println!("{}", get_graph(&graph));
                         continue 'outer;
                     }
 
                     if has_n_branch_paths(from_node, to_node, graph, path_count) {
                         remove_branch(from_node, to_node, graph);
                         processed = true;
-                        println!("remove_branch {} {} {}", from_node.index(), to_node.index(), path_count);
-                        println!("{}", get_graph(&graph));
+                        //println!("remove_branch {} {} {}", from_node.index(), to_node.index(), path_count);
+                        //println!("{}", get_graph(&graph));
                         continue 'outer;
                     }
                 }
@@ -355,7 +349,14 @@ pub fn flatten(graph: &mut Graph, start: NodeIndex, end: NodeIndex) {
     }
 
     prune_graph(graph, start, end);
-    println!("{}", get_graph(&graph));
+    //println!("{}", get_graph(&graph));
+    let paths: Vec<_> = all_simple_paths::<Vec<_>, _>(&graph.clone(), start, end, 1, None).collect();
+    if paths.len() != 1 {
+        println!("ERROR: Simple path count from start to end is: {}", paths.len());
+        0
+    } else {
+        paths[0].iter().map(|&n| graph[n].delay()).sum()
+    }
 }
 
 pub fn prune_graph(graph: &mut Graph, start: NodeIndex, end: NodeIndex) {
@@ -369,8 +370,8 @@ pub fn get_graph(graph: &Graph) -> String {
     let gv = Dot::with_attr_getters(
         graph,
         &[Config::EdgeNoLabel, Config::NodeNoLabel],
-        &|g, edge| format!("label = \"{:.2}\"", edge.weight()),
-        &|_g, (i, node)| format!("label = \"{} {}\"", node, i.index()),
+        &|_, edge| format!("label = \"{:.2}\"", edge.weight()),
+        &|_, (i, node)| format!("label = \"{} {}\"", node, i.index()),
     );
 
     format!("{}", gv)
