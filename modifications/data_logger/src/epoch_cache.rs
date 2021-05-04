@@ -31,7 +31,7 @@ impl std::fmt::Debug for EpochCache {
 impl EpochCache {
     pub fn new() -> Self {
         EpochCache {
-            epoch_length: 10,
+            epoch_length: 40,
             current: 0,
             working: Vec::new(),
         }
