@@ -144,7 +144,8 @@ async fn experiment_1(graph: CallGraph, times: AppTimes, exp_1: Experiment1) -> 
     //println!("Graph time estimation: {}", flatten_time);
     //println!("EMA estimation: {}", times.lock().unwrap().durations.current());
 
-    format!("estimation: {}, actual, {}\n", flatten_time , exp_1.lock().unwrap().0)
+    // estimation, actual
+    format!("{},{}\n", flatten_time , exp_1.lock().unwrap().0)
 }
 
 #[get("/graph")]

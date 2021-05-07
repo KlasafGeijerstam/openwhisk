@@ -360,7 +360,12 @@ pub fn flatten(graph: &mut Graph, start: NodeIndex, end: NodeIndex) -> u64 {
 
 pub fn prune_graph(graph: &mut Graph, start: NodeIndex, end: NodeIndex) {
     let paths: Vec<_> = all_simple_paths::<Vec<_>, _>(&graph.clone(), start, end, 1, None).collect();
-    graph.retain_nodes(|_, node| paths[0].contains(&node));
+
+    if paths.len() == 0 {
+        println!("prune_graph paths == 0");
+    } else {
+        graph.retain_nodes(|_, node| paths[0].contains(&node));
+    }
 }
 
 pub fn get_graph(graph: &Graph) -> String {
