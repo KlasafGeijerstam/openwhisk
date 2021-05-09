@@ -4,6 +4,8 @@ def p(a, b):
     print(f"\"{str(round(a/b, 2)).replace('.', ',')}\"")
 
 
+input()
+
 for line in stdin:
     estimation, actual = map(int, line.strip().split(","))
 

@@ -4,3 +4,4 @@ callsfile
 logfile
 *.pdf
 tests
+test.py
